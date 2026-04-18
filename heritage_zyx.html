@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>中国非遗 · 千灯夜明</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700&display=swap');
+
+    :root {
+      --bg-dark: #05070a;        
+      --gold-light: #fceabb;     
+      --gold-dim: #a68c5b;       
+      --glow-color: rgba(252, 234, 187, 0.4); 
+      --river-blue: #5ca0d3;     
+      --marker-scale: 0.6;       
+    }
+
+    *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+    html,body { width:100%; height:100%; overflow:hidden; background:var(--bg-dark); }
+    body { font-family: 'Noto Serif SC', 'Songti SC', 'STSong', serif; color:var(--gold-light); font-weight: 300; }
+
+    /* ═══ MAP ═══ */
+    #map { position:fixed; inset:0; }
+    .maplibregl-ctrl-logo, .maplibregl-ctrl-attrib, .maplibregl-ctrl-top-right, .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { display:none!important; }
+
+    /* ═══ ATMOSPHERE ═══ */
+    #stars {
+      position:fixed; inset:0; z-index:2; pointer-events:none;
+      background: url('https://www.transparenttextures.com/patterns/stardust.png');
+      opacity: 0.15; mix-blend-mode: screen; animation: drift 150s linear infinite;
+    }
+    #fog {
+      position:fixed; bottom:0; left:0; width:100%; height:30vh; z-index:3; pointer-events:none;
+      background: linear-gradient(to top, rgba(252, 234, 187, 0.05) 0%, transparent 100%);
+    }
+    @keyframes drift { 0% { background-position: 0 0; } 100% { background-position: 1000px 500px; } }
+
+    /* ═══ LOADING ═══ */
+    #loading {
+      position:fixed; inset:0; z-index:9000; background: var(--bg-dark);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      transition:opacity 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #loading.out { opacity:0; pointer-events:none; }
+    .ld-ink { width:40px; height:40px; border-radius:50%; background:var(--gold-light); filter:blur(15px); animation:inkSpread 3s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+    @keyframes inkSpread { 0% { transform:scale(0.1); opacity:1; } 100% { transform:scale(4); opacity:0; } }
+
+    /* ═══ UI PANELS ═══ */
+    .g-panel {
+      background: rgba(5, 7, 10, 0.7); backdrop-filter: blur(12px);
+      border: 1px solid rgba(252, 234, 187, 0.1); color: var(--gold-light); border-radius: 2px;
+    }
+
+    #hdr { position:fixed; top:40px; left:40px; z-index:500; display:flex; align-items:flex-start; gap:20px; pointer-events:none; }
+    .h-zh { writing-mode:vertical-rl; font-size:36px; letter-spacing:12px; line-height: 1; font-weight: 400; opacity: 0.9; }
+    .h-en { writing-mode:vertical-rl; font-size:10px; color:var(--gold-dim); letter-spacing:6px; font-family: sans-serif; text-transform: uppercase; margin-top: 5px; opacity: 0.6; }
+    .h-line { width: 1px; height: 120px; background: linear-gradient(to bottom, var(--gold-light), transparent); opacity: 0.3; margin-top: 10px; }
+
+    #zbadge { position:fixed; top:30px; right:30px; z-index:600; padding:8px 16px; font-size:12px; letter-spacing:6px; pointer-events:none; opacity: 0.8; }
+    
+    /* ═══ 图例与气泡提示 (Legend & Tooltips) ═══ */
+    #leg { position:fixed; bottom:140px; right:30px; z-index:600; padding:20px; }
+    .lgt { font-size:13px; font-weight:300; border-bottom:1px solid rgba(252,234,187,0.2); padding-bottom:10px; margin-bottom:15px; letter-spacing:4px; text-align:center; color:var(--gold-dim); pointer-events:none; }
+    
+    .lgr { display:flex; align-items:center; gap:12px; font-size:12px; margin-top:15px; letter-spacing:2px; font-weight: 300; cursor: pointer; transition: all 0.3s ease; opacity: 0.9; }
+    .lgr:hover { opacity: 1; text-shadow: 0 0 8px rgba(252,234,187,0.5); }
+    .lgr.off { opacity: 0.3; filter: grayscale(100%); text-shadow: none; }
+    
+    .lgd-lantern { width:8px; height:18px; border:1px solid var(--gold-light); background:rgba(252,234,187,0.1); box-shadow:0 0 5px var(--gold-light); }
+    .lgd-river { width:16px; height:2px; background:var(--river-blue); box-shadow:0 0 6px var(--river-blue); }
+    .lgd-light { width:6px; height:6px; border-radius:50%; background:#ff7b00; box-shadow:0 0 6px #ff7b00; }
+
+    /* 气泡样式 */
+    .t-wrap { position: relative; display: flex; align-items: center; }
+    .t-icon { 
+      width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--gold-dim);
+      font-size: 10px; display: flex; align-items: center; justify-content: center;
+      color: var(--gold-dim); transition: all 0.3s; margin-left: 2px;
+    }
+    .t-wrap:hover .t-icon { color: var(--bg-dark); background: var(--gold-light); border-color: var(--gold-light); }
+    
+    .t-box {
+      position: absolute; bottom: 25px; right: -10px; width: 220px;
+      background: rgba(5,7,10,0.9); backdrop-filter: blur(10px);
+      border: 1px solid rgba(252,234,187,0.2); border-radius: 4px;
+      padding: 12px; font-size: 12px; color: var(--gold-light); line-height: 1.8;
+      opacity: 0; pointer-events: none; transform: translateY(10px); transition: all 0.4s ease;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.8); text-shadow: none; font-weight: 300; text-align: justify;
+    }
+    .t-wrap:hover .t-box { opacity: 1; transform: translateY(0); }
+
+    #ctls { position:fixed; right:30px; top:90px; display:flex; flex-direction:column; gap:8px; z-index:600; }
+    .cb { width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; transition:all 0.3s; font-size:18px; opacity: 0.6; }
+    .cb:hover { opacity: 1; background: rgba(252, 234, 187, 0.1); border-color:var(--gold-light); }
+
+    #filterbar {
+      position:fixed; bottom:30px; left:50%; transform:translateX(-50%); z-index:600;
+      padding:12px 24px; display:flex; flex-direction:column; gap:12px;
+      border-top: 1px solid rgba(252, 234, 187, 0.1); border-bottom: 1px solid rgba(252, 234, 187, 0.1);
+      border-left: none; border-right: none; border-radius: 0; background: rgba(5,7,10,0.8);
+    }
+    .fb-row { display:flex; align-items:center; gap:15px; flex-wrap:nowrap; overflow-x:auto; }
+    .fb-row::-webkit-scrollbar { display:none; }
+    .fb-label { font-size:12px; letter-spacing:4px; color:var(--gold-dim); }
+    .fb-pill { padding:4px 12px; border:1px solid rgba(252,234,187,0.15); font-size:12px; color:var(--gold-dim); cursor:pointer; transition:all 0.3s ease; white-space:nowrap; letter-spacing:2px; background: transparent; border-radius: 2px; }
+    .fb-pill:hover { border-color:var(--gold-light); color:var(--gold-light); }
+    .fb-pill.active { background: rgba(252,234,187,0.1); color:var(--gold-light); border-color:var(--gold-light); }
+
+    /* ═══ MARKERS ═══ */
+    .hm { cursor:pointer; z-index: 1; }
+    .hm-scale { transform: scale(var(--marker-scale)); transform-origin: bottom center; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    @keyframes lanternFloat { 0%,100%{ transform: translateY(0); } 50%{ transform: translateY(-8px); } }
+    @keyframes pinIn { 0% { opacity:0; transform: translateY(20px); } 100% { opacity:1; transform: translateY(0); } }
+
+    .hm-pin { display:flex; flex-direction:column; align-items:center; transform-origin:bottom center; animation: lanternFloat 6s ease-in-out infinite, pinIn 0.8s cubic-bezier(0.2,0.8,0.2,1); }
+    
+    .lantern-body {
+      width: 36px; height: 130px; background: rgba(252, 234, 187, 0.03); backdrop-filter: blur(4px);
+      border: 1px solid rgba(252, 234, 187, 0.2); border-radius: 1px; box-shadow: 0 0 15px var(--glow-color), inset 0 0 10px rgba(252, 234, 187, 0.05);
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 10px 0; transition: all 0.4s ease; position: relative;
+    }
+    .lantern-body::after { content: ''; position:absolute; bottom: -30px; width: 1px; height: 30px; background: linear-gradient(to bottom, rgba(252, 234, 187, 0.4), transparent); }
+    .hm-pin:hover .lantern-body { transform: translateY(-5px); border-color: rgba(252, 234, 187, 0.6); box-shadow: 0 0 25px var(--glow-color), inset 0 0 15px rgba(252, 234, 187, 0.1); background: rgba(252, 234, 187, 0.08); }
+    .l-emoji { font-size: 16px; opacity: 0.6; margin-bottom: 12px; filter: grayscale(40%); }
+    .l-name { writing-mode: vertical-rl; font-size: 13px; color: var(--gold-light); letter-spacing: 5px; font-weight: 300; opacity: 0.9; }
+
+    /* ═══ FLIP OVERLAY ═══ */
+    #fly-overlay { position: fixed; inset: 0; z-index: 2000; pointer-events: none; background: rgba(5, 7, 10, 0); backdrop-filter: blur(0px); transition: background 0.8s ease, backdrop-filter 0.8s ease; display: flex; align-items: center; justify-content: center; }
+    #fly-overlay.active { pointer-events: all; background: rgba(5, 7, 10, 0.85); backdrop-filter: blur(12px); }
+    #hero-lantern { position: absolute; transform-origin: center center; opacity: 0; transition: all 0.8s cubic-bezier(0.2, 1, 0.3, 1); }
+    #hero-lantern.flying { opacity: 1; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) scale(1) !important; }
+    .hero-card { width: 380px; max-height: 85vh; background: rgba(10, 12, 16, 0.85); border: 1px solid rgba(252, 234, 187, 0.2); box-shadow: 0 30px 60px rgba(0,0,0,0.9), 0 0 40px rgba(252, 234, 187, 0.05); display: flex; flex-direction: column; overflow: hidden; position: relative; border-radius: 2px; }
+    .hero-close { position: absolute; top: 15px; right: 15px; width: 30px; height: 30px; border: 1px solid var(--gold-dim); color: var(--gold-dim); font-weight: 300; font-size: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; transition: all 0.3s; border-radius: 50%; background: rgba(0,0,0,0.3); }
+    .hero-close:hover { color: var(--gold-light); border-color: var(--gold-light); transform: rotate(90deg); }
+    .hc-photo-wrap { height: 200px; position: relative; border-bottom: 1px solid rgba(252, 234, 187, 0.1); background: rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; }
+    .hc-photo-fallback { font-size: 60px; opacity: 0.3; filter: grayscale(100%); }
+    .hc-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.8; transition: opacity 0.5s; }
+    .hero-card:hover .hc-photo { opacity: 1; }
+    .hc-info { padding: 35px 30px; display: flex; flex-direction: column; gap: 15px; }
+    .hc-top { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid rgba(252, 234, 187, 0.1); padding-bottom: 15px; }
+    .hc-name { font-size: 28px; color: var(--gold-light); letter-spacing: 6px; font-weight: 400; line-height: 1.2; }
+    .hc-cat { font-size: 11px; color: var(--gold-dim); letter-spacing: 4px; writing-mode: vertical-rl; margin-bottom: 5px; }
+    .hc-region { font-size: 12px; color: var(--gold-dim); letter-spacing: 4px; margin-top: 5px; }
+    .hc-desc { font-size: 13px; line-height: 2.2; color: #ccc; text-align: justify; font-weight: 300; opacity: 0.9; margin-top: 10px; }
+    .hc-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }
+    .hc-tag { font-size: 11px; padding: 2px 0; color: var(--gold-dim); letter-spacing: 2px; position: relative; }
+    .hc-tag:not(:last-child)::after { content: '/'; position: absolute; right: -8px; color: rgba(252, 234, 187, 0.2); }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="stars"></div>
+<div id="fog"></div>
+
+<div id="loading">
+  <div class="ld-ink"></div>
+  <div style="font-size:24px; letter-spacing:15px; margin-top:20px; font-weight:300;">千灯夜明</div>
+</div>
+
+<div id="hdr">
+  <div class="h-zh">中国非遗文化</div>
+  <div style="display:flex; flex-direction:column; align-items:center;">
+    <div class="h-en">Heritage</div>
+    <div class="h-line"></div>
+  </div>
+</div>
+
+<div id="zbadge" class="g-panel"><span id="zlbl">九州大观</span></div>
+
+<!-- 图例与气泡说明 -->
+<div id="leg" class="g-panel">
+  <div class="lgt">人文图鉴</div>
+  <div class="lgr" style="pointer-events:none;">
+    <div class="lgd-lantern"></div>非遗
+  </div>
+  
+  <!-- 水脉带气泡 -->
+  <div class="lgr" id="toggle-river">
+    <div class="lgd-river"></div>华夏水脉
+    <div class="t-wrap">
+      <div class="t-icon">?</div>
+      <div class="t-box"><b>万里长江与九曲黄河</b><br><br>文明的血脉。千年江河之水，孕育了沿岸无数璀璨的非遗瑰宝。河流形态按真实走向勾勒，由细至宽奔流入海。</div>
+    </div>
+  </div>
+  
+  <!-- 聚落带气泡 -->
+  <div class="lgr" id="toggle-light">
+    <div class="lgd-light"></div>薪火聚落
+    <div class="t-wrap">
+      <div class="t-icon">?</div>
+      <div class="t-box"><b>万家灯火，生生不息</b><br><br>以非遗发源地为核心，在大地上散落的万家灯火。象征着高雅的非遗文化皆源于民间烟火，受百姓世代守护。</div>
+    </div>
+  </div>
+</div>
+
+<div id="ctls">
+  <div class="cb g-panel" id="c-in" title="放大">＋</div>
+  <div class="cb g-panel" id="c-out" title="缩小">－</div>
+  <div class="cb g-panel" id="c-rst" title="重置">⌂</div>
+  <div class="cb g-panel" id="c-tlt" title="右键拖拽可无缝翻转">⛰</div>
+</div>
+
+<div id="filterbar" class="g-panel">
+  <div class="fb-row">
+    <div class="fb-label">归类</div>
+    <div class="fb-pill active" data-filter="cat" data-val="">大象无形</div>
+    <div class="fb-pill" data-filter="cat" data-val="performance">表演艺术</div>
+    <div class="fb-pill" data-filter="cat" data-val="craft">传统技艺</div>
+    <div class="fb-pill" data-filter="cat" data-val="folklore">民俗信仰</div>
+    <div class="fb-pill" data-filter="cat" data-val="dance">传统舞蹈</div>
+  </div>
+  <div class="fb-row">
+    <div class="fb-label">分野</div>
+    <div class="fb-pill active" data-filter="area" data-val="">神州大地</div>
+    <div class="fb-pill" data-filter="area" data-val="华北">华北</div>
+    <div class="fb-pill" data-filter="area" data-val="华东">华东</div>
+    <div class="fb-pill" data-filter="area" data-val="华中">中原</div>
+    <div class="fb-pill" data-filter="area" data-val="华南">岭南</div>
+    <div class="fb-pill" data-filter="area" data-val="西南">西南</div>
+    <div class="fb-pill" data-filter="area" data-val="西北">塞外</div>
+    <div class="fb-pill" data-filter="area" data-val="东北">白山</div>
+  </div>
+</div>
+
+<div id="fly-overlay">
+  <div id="hero-lantern">
+    <div class="hero-card">
+      <div class="hero-close" id="hc-close">×</div>
+      <div class="hc-photo-wrap">
+        <div class="hc-photo-fallback" id="hc-emoji"></div>
+        <img class="hc-photo" id="hc-img" src="" alt="" style="display:none;">
+      </div>
+      <div class="hc-info">
+        <div class="hc-top">
+          <div class="hc-name" id="hc-name"></div>
+          <div class="hc-cat" id="hc-cat"></div>
+        </div>
+        <div class="hc-region" id="hc-region"></div>
+        <div class="hc-desc" id="hc-desc"></div>
+        <div class="hc-tags" id="hc-tags"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CAT_LABEL = { performance:'表演艺术', craft:'传统技艺', folklore:'民俗信仰', dance:'传统舞蹈' };
+
+/* 完整数据 */
+const HERITAGE = [
+  {id:'jingju',name:'京剧',region:'北京',area:'华北',cat:'performance',lon:116.40,lat:39.90,emoji:'🎭',img:'',desc:'京剧是中国最具代表性的戏曲剧种，综合了唱、念、做、打四种表演形式。以精致华美的脸谱、戏服和头饰闻名于世，被誉为"国粹"。',tags:['UNESCO','戏曲','脸谱']},
+  {id:'kunqu',name:'昆曲',region:'江苏·苏州',area:'华东',cat:'performance',lon:120.62,lat:31.30,emoji:'🎵',img:'',desc:'昆曲是中国现存最古老的剧种之一，发源于明代苏州昆山，以柔美婉转的唱腔、典雅精致的舞台表演著称。被誉为"百戏之祖"。',tags:['UNESCO','百戏之祖','吴文化']},
+  {id:'guqin',name:'古琴艺术',region:'湖北·武汉',area:'华中',cat:'performance',lon:114.31,lat:30.59,emoji:'🎼',img:'',desc:'古琴是中国最古老的弹拨乐器之一，有逾三千年历史。古琴演奏兼具音乐与哲学意境，与文人雅士的精神世界紧密相连。',tags:['UNESCO','七弦琴','文人乐']},
+  {id:'tibetan-opera',name:'藏戏',region:'西藏·拉萨',area:'西南',cat:'performance',lon:91.10,lat:29.65,emoji:'🎪',img:'',desc:'藏戏是西藏最具代表性的戏曲形式，已有六百余年历史。演员身着传统服饰演出，融合宗教故事、民间传说，唱腔高亢激越。',tags:['UNESCO','阿吉拉姆','面具艺术']},
+  {id:'jianzhi',name:'剪纸',region:'陕西',area:'西北',cat:'craft',lon:108.94,lat:34.27,emoji:'✂️',img:'',desc:'中国剪纸是一种在纸上剪刻图案的民间艺术，有逾两千年历史。图案多取材于自然、传说和吉祥寓意。广泛用于节日装饰。',tags:['UNESCO','民间艺术','镂空']},
+  {id:'mazu',name:'妈祖信俗',region:'福建·莆田',area:'华南',cat:'folklore',lon:119.01,lat:25.45,emoji:'🛕',img:'',desc:'妈祖信俗源自宋代福建莆田，以海上女神妈祖为崇拜对象。涵盖巡游、祭典、朝圣等丰富民俗活动，在沿海华人社会广泛流传。',tags:['UNESCO','海神信仰','闽台']},
+  {id:'fushun-yange',name:'抚顺地秧歌',region:'辽宁·抚顺',area:'东北',cat:'dance',lon:124.00,lat:41.88,emoji:'💃',img:'',desc:'抚顺地秧歌是国家级非遗，火爆幽默尽显满族风情，以豪放粗犷的舞步和诙谐的表演风格著称于东北民间舞蹈之林。',tags:['国家级','秧歌','满族']},
+  {id:'jingdezhen',name:'景德镇瓷器',region:'江西·景德镇',area:'华东',cat:'craft',lon:117.21,lat:29.27,emoji:'🏺',img:'https://images.unsplash.com/photo-1610701923232-a5676e2730de?auto=format&fit=crop&w=400&q=80',desc:'景德镇是中国的"千年瓷都"。其瓷器以"白如玉、明如镜、薄如纸、声如磬"著称。景德镇制瓷技艺环节繁杂，是中国工匠精神的体现。',tags:['千年瓷都','青花瓷','柴窑']},
+  {id:'thangka',name:'藏族唐卡',region:'西藏·日喀则',area:'西南',cat:'craft',lon:88.88,lat:29.27,emoji:'🖼️',img:'https://images.unsplash.com/photo-1563220490-6715f22f7783?auto=format&fit=crop&w=400&q=80',desc:'唐卡是藏传佛教绘画艺术的重要载体，以矿物颜料绘制，色彩历经千年不褪。题材多为佛像与故事，兼具宗教、艺术与文化价值。',tags:['藏传佛教','矿物颜料','千年技艺']},
+  {id:'shaolin',name:'少林功夫',region:'河南·登封',area:'华中',cat:'folklore',lon:113.04,lat:34.47,emoji:'🥋',img:'https://images.unsplash.com/photo-1549419163-952a2253dfd2?auto=format&fit=crop&w=400&q=80',desc:'少林功夫源于嵩山少林寺，是以禅宗佛教哲学为核心的武术体系。融合武术攻防、气功修炼与禅宗修心于一体，是中华武术的代表。',tags:['禅武合一','嵩山少林','中华武术']},
+  {id:'dai-dance',name:'傣族孔雀舞',region:'云南·西双版纳',area:'西南',cat:'dance',lon:100.77,lat:22.01,emoji:'🦚',img:'https://images.unsplash.com/photo-1588667617631-591b702ecad3?auto=format&fit=crop&w=400&q=80',desc:'傣族孔雀舞是傣族最重要的民间舞蹈，以模仿孔雀的形态动作为主要特征。孔雀舞轻盈婉约，动作流畅柔美，用于庆祝、祈福。',tags:['泼水节','孔雀文化','云南民族']},
+  {id:'hengshan-yaogu',name:'横山老腰鼓',region:'陕西·榆林',area:'西北',cat:'performance',lon:109.74,lat:38.28,emoji:'🥁',img:'',desc:'横山老腰鼓是黄土高原上的鼓舞艺术，老中青三代接力传承，以粗犷奔放的鼓点诠释黄土风情，已从黄土高原舞向国际舞台。',tags:['腰鼓','陕北','三代传承']},
+  {id:'huaxian-piying',name:'华县皮影',region:'陕西·渭南',area:'西北',cat:'performance',lon:109.77,lat:34.52,emoji:'🎑',img:'',desc:'华县皮影是中国皮影艺术的重要流派，可触可感的活态传承让千年光影在指尖延续，被誉为"电影的鼻祖"。',tags:['皮影戏','光影艺术']},
+  {id:'fengxiang-nisu',name:'凤翔泥塑',region:'陕西·宝鸡',area:'西北',cat:'craft',lon:107.40,lat:34.52,emoji:'🗿',img:'',desc:'凤翔泥塑以彩绘为主，造型夸张生动。沉浸式研学街区落地，让古老泥塑在童趣中焕发新生，是关中民间艺术的杰出代表。',tags:['泥塑','彩绘','关中']},
+  {id:'fucha-zhiyi',name:'茯茶制作技艺',region:'陕西·咸阳',area:'西北',cat:'craft',lon:108.71,lat:34.33,emoji:'🍵',img:'',desc:'茯茶是以渭河流域优质茶叶为原料，经独特渥堆发酵工艺制成的黑茶，国家级非遗，可观摩可品鉴，实现非遗与旅游深度融合。',tags:['黑茶','咸阳','发酵']},
+  {id:'qinqiang',name:'秦腔',region:'陕西',area:'西北',cat:'performance',lon:109.00,lat:34.60,emoji:'🎶',img:'',desc:'秦腔是中国西北地区最古老的剧种之一，国家级非遗。兵团剧团年均百场下基层，让大秦之声在边疆生生不息。',tags:['秦腔','古老剧种']},
+  {id:'shaanbei-minge',name:'陕北民歌',region:'陕西·延安',area:'西北',cat:'performance',lon:109.49,lat:36.60,emoji:'🎤',img:'',desc:'陕北民歌唱腔高亢，能穿透云彩，山沟沟里的人们用嗓子吼出喜怒哀乐，是黄土高原人民情感的最真实表达。',tags:['民歌','黄土文化']},
+  {id:'lanzhou-taipinggu',name:'兰州太平鼓',region:'甘肃·兰州',area:'西北',cat:'performance',lon:103.82,lat:36.06,emoji:'🥁',img:'',desc:'兰州太平鼓号称"天下第一鼓"，鼓声震天，气势如黄河奔涌，是甘肃最具代表性的民间表演艺术之一。',tags:['太平鼓','天下第一']},
+  {id:'kushuigaoqiao',name:'苦水高高跷',region:'甘肃·兰州',area:'西北',cat:'dance',lon:103.60,lat:36.40,emoji:'🎪',img:'',desc:'苦水高高跷是全国最高的高跷表演，舞者踩着三层楼高的木腿行走，惊险绝伦，展示了甘肃民间艺人的胆量与技艺。',tags:['高跷','惊险']},
+  {id:'lanzhou-guzi',name:'兰州鼓子',region:'甘肃·兰州',area:'西北',cat:'performance',lon:103.73,lat:36.03,emoji:'🎵',img:'',desc:'兰州鼓子是流传于兰州茶馆的传统曲艺，街坊邻居跟着帮腔，几辈子的老调热闹又亲切，是西北城市市井文化的活化石。',tags:['曲艺','茶馆']},
+  {id:'hexibao-juan',name:'河西宝卷',region:'甘肃·张掖',area:'西北',cat:'performance',lon:100.45,lat:38.93,emoji:'📜',img:'',desc:'河西宝卷是流传于河西走廊的民间说唱艺术，老艺人弹着三弦念唱劝善故事，像说书又像唱戏，承载着丝路文化记忆。',tags:['宝卷','丝路']},
+  {id:'ganzhou-xiaodiao',name:'甘州小调',region:'甘肃·张掖',area:'西北',cat:'performance',lon:100.50,lat:38.95,emoji:'🎼',img:'',desc:'甘州小调是张掖地区村里自乐班传唱的民间音乐，听着就像回到了小时候，是河西走廊原生态音乐的代表。',tags:['小调','原生态']},
+  {id:'gaoyedeng',name:'高叶灯',region:'甘肃·陇西',area:'西北',cat:'folklore',lon:104.63,lat:35.00,emoji:'🏮',img:'',desc:'高叶灯是陇西县传统民俗灯彩，网红博主九月走进陇西牛蹄湾，把西北夜色的炽热装进千万人的屏幕里。',tags:['灯彩','民俗']},
+  {id:'zhongwei-bianzhi',name:'中卫玉米皮编织技艺',region:'宁夏·中卫',area:'西北',cat:'craft',lon:105.19,lat:37.50,emoji:'🌽',img:'',desc:'中卫玉米皮编织技艺是宁夏代表性非遗，以玉米皮为原料编织生活用品与艺术品，是流淌在非遗长河里的符号。',tags:['草编','手艺']},
+  {id:'sangpi-zhi',name:'桑皮纸制作技艺',region:'新疆·墨玉',area:'西北',cat:'craft',lon:79.73,lat:37.28,emoji:'📄',img:'',desc:'桑皮纸以桑树皮熬煮加胡杨碱制成，轻、韧、不怕虫蛀，这门手艺从唐代传承至今，还能写字画画，是丝路文明的活体遗存。',tags:['造纸','唐代']},
+  {id:'hetian-ditan',name:'和田地毯',region:'新疆·和田',area:'西北',cat:'craft',lon:79.93,lat:37.11,emoji:'🪄',img:'',desc:'和田地毯是国家级非遗，以优质羊毛手工织就，图案精美、色彩富丽，被誉为"羊毛织出的民族史诗"，享誉世界。',tags:['织造','羊毛']},
+  {id:'huanren-pankang',name:'桓仁盘炕技艺',region:'辽宁·本溪',area:'东北',cat:'craft',lon:125.36,lat:41.27,emoji:'🏠',img:'',desc:'桓仁盘炕技艺是国家级非遗，让北方民居的"温暖记忆"在现代生活中延续，是东北民居文化与建筑智慧的集中体现。',tags:['建筑','民居']},
+  {id:'liaoxi-taipinggu',name:'辽西太平鼓',region:'辽宁·葫芦岛',area:'东北',cat:'performance',lon:120.83,lat:40.71,emoji:'🥁',img:'',desc:'辽西太平鼓是敲响乡愁的民间鼓乐，让太平鼓声代代相传，是辽西地区最具代表性的传统音乐表演形式。',tags:['鼓乐','乡愁']},
+  {id:'jinzhou-piying',name:'锦州皮影戏',region:'辽宁·锦州',area:'东北',cat:'performance',lon:121.13,lat:41.10,emoji:'🎑',img:'',desc:'锦州皮影戏百年五代光影传奇，以精湛的镂刻技艺讲述故事，让古老皮影艺术在东北大地生生不息。',tags:['皮影','镂刻']},
+  {id:'haicheng-gaoqiao',name:'海城高跷',region:'辽宁·鞍山',area:'东北',cat:'dance',lon:122.68,lat:40.88,emoji:'🎭',img:'',desc:'海城高跷有三百余年历史，舞者扭浪逗相、代代相传，被誉为"东方芭蕾"，已登上世界舞台，是辽宁民间舞蹈的骄傲。',tags:['高跷','东方芭蕾']},
+  {id:'bai-miansu',name:'白氏面塑',region:'吉林·长春',area:'东北',cat:'craft',lon:125.32,lat:43.82,emoji:'🫶',img:'',desc:'白氏面塑以捏、搓、压、揉、掀、点、切、刻、划等技法，行云流水间让人物形象栩栩如生，是吉林民间造型艺术的代表。',tags:['面塑','捏塑']},
+  {id:'changbai-jianzhi',name:'长白山满族剪纸',region:'吉林·白山',area:'东北',cat:'craft',lon:126.43,lat:41.94,emoji:'✂️',img:'',desc:'长白山满族剪纸是国家级非遗，跨界合作焕发新生，让红彤彤的剪纸在童趣中代代相传，展现了满族文化的独特魅力。',tags:['剪纸','满族']},
+  {id:'chaoxian-nongyue',name:'朝鲜族农乐舞',region:'吉林·延边',area:'东北',cat:'dance',lon:129.51,lat:42.90,emoji:'🎊',img:'',desc:'朝鲜族农乐舞是国家级非遗，彩带旋转翻飞如虹，欢快灵动尽展民族豪迈气概，是延边朝鲜族文化的最美表达。',tags:['农乐舞','朝鲜族']},
+  {id:'chaoxian-dongxiao',name:'朝鲜族洞箫音乐',region:'吉林·延边',area:'东北',cat:'performance',lon:129.48,lat:42.88,emoji:'🎷',img:'',desc:'朝鲜族洞箫音乐省级非遗，其深沉悠远的民族之音，在数字化传播中生生不息，是朝鲜族传统器乐的精髓所在。',tags:['器乐','洞箫']},
+  {id:'fujin-yange',name:'富锦大秧歌',region:'黑龙江·佳木斯',area:'东北',cat:'dance',lon:132.03,lat:47.25,emoji:'💃',img:'',desc:'富锦大秧歌是中国北方秧歌城的名片，老中青三代同台传承，乡土瑰宝舞向全国，展现了黑龙江平原人民的豪放气质。',tags:['大秧歌','豪放']},
+  {id:'manzu-minge',name:'满族传统民歌',region:'黑龙江·哈尔滨',area:'东北',cat:'performance',lon:126.53,lat:45.80,emoji:'🎤',img:'',desc:'满族传统民歌承载着满族先世的音乐记忆，让白山黑水间的古老歌谣在新时代继续传唱，是满族文化的重要载体。',tags:['民歌','古老歌谣']},
+  {id:'dawoer-cixiu',name:'达斡尔族刺绣',region:'黑龙江·齐齐哈尔',area:'东北',cat:'craft',lon:123.95,lat:47.35,emoji:'🧵',img:'',desc:'达斡尔族刺绣以针线为笔，将达斡尔族的图腾与故事绣进岁月，让民族技艺代代相传，是北疆少数民族文化的珍贵遗产。',tags:['刺绣','图腾']},
+  {id:'elunchun-shaman',name:'鄂伦春族萨满服饰',region:'黑龙江·逊克',area:'东北',cat:'folklore',lon:128.47,lat:49.56,emoji:'🦌',img:'',desc:'鄂伦春族萨满服饰守护着鄂伦春族的信仰与审美，让萨满服饰成为民族文化的活态载体，是大兴安岭文明的活化石。',tags:['服饰','萨满']},
+  {id:'yupi-zhizuo',name:'鱼皮制作技艺',region:'黑龙江·牡丹江',area:'东北',cat:'craft',lon:129.61,lat:44.58,emoji:'🐟',img:'',desc:'鱼皮制作技艺将民族渔猎智慧融入手作，让"鱼皮衣"这一古老技艺在现代焕发新生，是赫哲族文化的重要组成部分。',tags:['渔猎','赫哲族']},
+  {id:'harbin-bingdeng',name:'哈尔滨冰灯冰雕制作技艺',region:'黑龙江·哈尔滨',area:'东北',cat:'craft',lon:126.63,lat:45.74,emoji:'🧊',img:'',desc:'哈尔滨冰灯冰雕以冰为玉、以刀为笔，将北国的严寒雕琢成晶莹剔透的艺术，享誉世界，是中国冰雪文化的标志。',tags:['冰雕','北国']},
+  {id:'da-tieshu',name:'打铁水',region:'重庆·江津',area:'西南',cat:'folklore',lon:106.26,lat:29.29,emoji:'🔥',img:'',desc:'"人在火中舞，龙在火中飞"——打铁水是传承千年的壮观技艺，铁水火花洒向夜空，用最壮美的方式点亮重庆的夜晚。',tags:['壮观','千年绝技']},
+  {id:'youzhou-miaoxiu',name:'酉州苗绣',region:'重庆·酉阳',area:'西南',cat:'craft',lon:108.77,lat:28.84,emoji:'🧵',img:'',desc:'酉州苗绣是国家级非遗，绣娘用针线绣出苗族的山川与历史，让千年技艺在乡村振兴中活态传承，焕发时代新貌。',tags:['苗绣','活态传承']},
+  {id:'xilan-kapu',name:'西兰卡普',region:'重庆·渝东南',area:'西南',cat:'craft',lon:108.80,lat:29.53,emoji:'🪡',img:'',desc:'西兰卡普是土家族传统织锦，织娘坐在传统木织机旁，靛蓝的经线与彩色的纬线交织出民族史诗。',tags:['织锦','土家族']},
+  {id:'dujiangyan-fangshuijie',name:'都江堰放水节',region:'四川·成都',area:'西南',cat:'folklore',lon:103.61,lat:30.99,emoji:'💧',img:'',desc:'都江堰放水节再现古法治水智慧，是川西平原农耕文明活态传承的盛大典礼，见证了中华民族两千年来的水利智慧。',tags:['放水节','水利']},
+  {id:'muchuan-caolng',name:'沐川草龙',region:'四川·乐山',area:'西南',cat:'dance',lon:103.91,lat:28.96,emoji:'🐉',img:'',desc:'沐川草龙以稻草编扎而成，舞动时金光闪闪，是四川乐山地区独特的民间龙舞艺术，寄托着农民对丰收的美好祈愿。',tags:['草龙','丰收']},
+  {id:'chuanbei-dengxi',name:'川北灯戏',region:'四川·南充',area:'西南',cat:'performance',lon:106.08,lat:30.80,emoji:'🎭',img:'',desc:'川北灯戏是土生土长的民间小戏，灯中有戏、戏中有灯，诙谐幽默接地气，是四川盆地北部最具地方特色的戏剧形式。',tags:['灯戏','诙谐']},
+  {id:'dai-xiangjiaogu',name:'傣族象脚鼓舞',region:'云南·西双版纳',area:'西南',cat:'dance',lon:100.80,lat:22.00,emoji:'🥁',img:'',desc:'傣族象脚鼓舞中舞者挎着象脚鼓，边敲边跳、辗转腾挪，展现了水一样民族的灵动与礼赞，是西双版纳最具代表性的舞蹈。',tags:['象脚鼓','傣族']},
+  {id:'miao-lusheng',name:'苗族芦笙舞',region:'云南·玉溪',area:'西南',cat:'dance',lon:102.54,lat:24.35,emoji:'🎺',img:'',desc:'苗族芦笙舞中舞者在高高的木桩上腾挪跳跃，芦笙不停、脚步不乱，展现了苗族人民的英勇与灵巧。',tags:['芦笙舞','苗族']},
+  {id:'bai-zaran',name:'白族扎染',region:'云南·大理',area:'西南',cat:'craft',lon:100.22,lat:25.59,emoji:'👘',img:'',desc:'大理周城白族扎染600年传承，植物染色演绎千变万化的蓝白艺术，是苍山洱海间最美的文化符号之一。',tags:['扎染','植物染色']},
+  {id:'anshun-laran',name:'安顺蜡染',region:'贵州·安顺',area:'西南',cat:'craft',lon:105.95,lat:26.25,emoji:'🎨',img:'',desc:'安顺蜡染以蜡刀蘸着温热的蜂蜡，在素白土布上勾勒山川江河，是贵州苗族布依族文化的精粹，构图精美、意境深远。',tags:['蜡染','蜡刀']},
+  {id:'anshun-mugiao',name:'安顺木雕',region:'贵州·安顺',area:'西南',cat:'craft',lon:105.92,lat:26.22,emoji:'🪵',img:'',desc:'安顺木雕一刀一凿间，既有驱邪纳福的古老寓意，也有不畏艰难的精气神，是贵州屯堡文化独特的艺术表达。',tags:['木雕','屯堡文化']},
+  {id:'xiangba-zangxi',name:'湘巴藏戏',region:'西藏·日喀则',area:'西南',cat:'performance',lon:89.10,lat:29.40,emoji:'🎭',img:'',desc:'湘巴藏戏是人类非物质文化遗产，历史悠久、独具特色，产自日喀则南木林县，是与卫藏藏戏并列的重要藏戏流派。',tags:['藏戏','日喀则']},
+  {id:'dege-diaoban',name:'雕版印刷技艺',region:'西藏·德格',area:'西南',cat:'craft',lon:98.59,lat:31.80,emoji:'📚',img:'',desc:'德格印经院的雕版技艺传承千年，工匠一笔一划刻出藏文化的厚重，是雪域高原上规模最大的藏族文化宝库。',tags:['雕版','印经院']},
+  {id:'yingshan-chanhua',name:'英山缠花',region:'湖北·黄冈',area:'华中',cat:'craft',lon:115.68,lat:30.73,emoji:'🌸',img:'',desc:'英山缠花被誉为"立体绣花"，用丝线缠绕在纸板和铜丝上塑造出花卉等精美造型，是湖北黄冈地区独特的民间工艺。',tags:['缠花','立体绣花']},
+  {id:'hanju',name:'汉剧',region:'湖北·武汉',area:'华中',cat:'performance',lon:114.28,lat:30.57,emoji:'🎶',img:'',desc:'汉剧是国家级非遗，是湖北传统戏曲的重要代表，对京剧的形成有深远影响，被誉为"京剧之母"。',tags:['汉剧','京剧之母']},
+  {id:'hanxiu',name:'汉绣',region:'湖北·武汉',area:'华中',cat:'craft',lon:114.30,lat:30.55,emoji:'🧵',img:'',desc:'汉绣是中国十大名绣之一，主要盛行于荆州、武汉、洪湖等地，以绣法丰富、纹样华丽著称，气势恢宏。',tags:['汉绣','十大名绣']},
+  {id:'wuhan-miansu',name:'武汉面塑',region:'湖北·武汉',area:'华中',cat:'craft',lon:114.26,lat:30.60,emoji:'🗿',img:'',desc:'武汉面塑让面塑从庙会点缀变为讲述当代故事的立体艺术，以精湛的手艺捏塑出武汉这座城市的生命与温度。',tags:['面塑','捏塑']},
+  {id:'hubei-pingshu',name:'湖北评书',region:'湖北·武汉',area:'华中',cat:'performance',lon:114.32,lat:30.59,emoji:'📖',img:'',desc:'湖北评书以武汉方言讲评世事，一人一扇一块醒木，演绎世间百态，是武汉码头文化孕育出的独特曲艺形式。',tags:['评书','码头文化']},
+  {id:'suizhou-bianzhong',name:'青铜编钟制作技艺',region:'湖北·随州',area:'华中',cat:'craft',lon:113.38,lat:31.69,emoji:'🔔',img:'',desc:'随州青铜编钟制作技艺复原失传千年古法，再现一钟双音的青铜礼乐史诗，让曾侯乙编钟的千古绝响重回人间。',tags:['编钟','青铜']},
+  {id:'xiangxiu',name:'湘绣',region:'湖南·长沙',area:'华中',cat:'craft',lon:112.98,lat:28.19,emoji:'🧵',img:'',desc:'湘绣以独创的"鬅毛针"法绣制动物毛发，层次分明、栩栩如生，是中国四大名绣之一，代表着湖湘文化的精致与细腻。',tags:['湘绣','鬅毛针']},
+  {id:'taoyuan-cixiu',name:'桃源刺绣',region:'湖南·常德',area:'华中',cat:'craft',lon:111.68,lat:29.03,emoji:'🧵',img:'',desc:'桃源刺绣是湘绣的重要流派，构图夸张、色彩浓艳、针法多变，是湘西北地区刺绣艺术的杰出代表。',tags:['刺绣','湘绣流派']},
+  {id:'jinghe-xi',name:'荆河戏',region:'湖南·常德',area:'华中',cat:'performance',lon:111.70,lat:29.05,emoji:'🎭',img:'',desc:'荆河戏因流传于长江荆河段而得名，唱腔高亢激昂，如今有了"00后"接班人，让这一古老剧种焕发出新的生机。',tags:['荆河戏','地方戏']},
+  {id:'tujia-dalizi',name:'土家族打溜子',region:'湖南·湘西',area:'华中',cat:'performance',lon:109.74,lat:28.32,emoji:'🎵',img:'',desc:'土家族打溜子是国家级非遗，是土家族特有的民间器乐合奏，表现了土家人的生活情趣，节奏欢快、层次丰富。',tags:['打溜子','器乐']},
+  {id:'xiangju',name:'湘剧',region:'湖南·长沙',area:'华中',cat:'performance',lon:113.00,lat:28.21,emoji:'🎶',img:'',desc:'湘剧是湖南地方大戏，融高腔、低牌子、昆腔、弹腔于一体，集湖湘文化之精华，在湖南各地广泛传播。',tags:['湘剧','湖湘文化']},
+  {id:'tujia-zhijin',name:'土家族织锦技艺',region:'湖南·湘西',area:'华中',cat:'craft',lon:109.73,lat:28.31,emoji:'🪡',img:'',desc:'土家族织锦技艺通经断纬、巧手织彩，以斑斓纹样传承土家千年记忆，每一幅织锦都是一部民族历史的图像叙事。',tags:['织锦','土家族']},
+  {id:'junci-shaozhi',name:'钧瓷烧制技艺',region:'河南·禹州',area:'华中',cat:'craft',lon:113.49,lat:34.16,emoji:'🏺',img:'',desc:'钧瓷烧制技艺是国家级非遗，以"入窑一色，出窑万彩"的神奇窑变著称，是中国五大名窑之首，宋代达到顶峰。',tags:['钧瓷','五大名窑']},
+  {id:'yuju',name:'豫剧',region:'河南·郑州',area:'华中',cat:'performance',lon:113.65,lat:34.76,emoji:'🎶',img:'',desc:'豫剧是中国最大的地方剧种之一，唱腔激越高亢、通俗易懂，在全国各省均有演出，深受广大观众喜爱。',tags:['豫剧','大剧种']},
+  {id:'zhuxianzhen-nianhua',name:'朱仙镇木版年画',region:'河南·开封',area:'华中',cat:'craft',lon:114.30,lat:34.80,emoji:'🖼️',img:'',desc:'朱仙镇木版年画构图饱满、线条粗犷、色彩艳丽，其制作技艺是国家级非遗，是中国年画艺术的重要源头之一。',tags:['木版年画','朱仙镇']},
+  {id:'tang-sancai',name:'唐三彩烧制技艺',region:'河南·洛阳',area:'华中',cat:'craft',lon:112.45,lat:34.68,emoji:'🏺',img:'',desc:'唐三彩烧制技艺是国家级非遗，一种历史悠久的传统工艺品，品种繁多、造型典雅，是唐代盛世的文化符号。',tags:['唐三彩','陶瓷']},
+  {id:'bianxiu',name:'汴绣',region:'河南·开封',area:'华中',cat:'craft',lon:114.33,lat:34.79,emoji:'🧵',img:'',desc:'汴绣继承宋代绣画精髓，以针线精摹古今名画，古朴典雅，是北宋皇城开封留存至今的重要文化遗产。',tags:['汴绣','宋代刺绣']},
+  {id:'beijing-huadeng',name:'花灯扎制技艺',region:'北京',area:'华北',cat:'craft',lon:116.38,lat:39.92,emoji:'🏮',img:'',desc:'北京花灯扎制技艺坚持纯手工制作彩灯，在元宵节等传统节日点亮古院，延续着皇城脚下千年不息的灯彩文明。',tags:['花灯','扎制']},
+  {id:'liu-jingdagu',name:'刘派京韵大鼓',region:'天津·和平',area:'华北',cat:'performance',lon:117.20,lat:39.13,emoji:'🥁',img:'',desc:'刘派京韵大鼓是京韵大鼓的重要流派，在新时代持续传唱，以独特的唱腔韵味展现天津卫的曲艺文化底蕴。',tags:['京韵大鼓','曲艺']},
+  {id:'sun-qiaodiao',name:'孙氏俏色巧雕技艺',region:'天津·和平',area:'华北',cat:'craft',lon:117.19,lat:39.15,emoji:'💎',img:'',desc:'孙氏俏色巧雕技艺用玉石天然色泽纹理，因材施艺、俏色巧雕，赋予顽石灵动生命，是天津玉雕艺术的杰出代表。',tags:['巧雕','玉石']},
+  {id:'tianjin-zhujian',name:'传统铸剑技艺',region:'天津·宁河',area:'华北',cat:'craft',lon:117.83,lat:39.33,emoji:'⚔️',img:'',desc:'传统铸剑技艺从选材、锻造、淬火到打磨，让刀剑不仅是器械，更具艺术价值，是中国冷兵器文化的活态传承。',tags:['铸剑','冷兵器']},
+  {id:'wuqiao-zaji',name:'吴桥杂技',region:'河北·沧州',area:'华北',cat:'performance',lon:116.84,lat:38.30,emoji:'🎪',img:'',desc:'吴桥杂技享誉海内外，是"流淌在非遗长河里的城市"的代表符号之一，在这里"上至九十九，下至刚会走，人人有一手"。',tags:['杂技','绝活']},
+  {id:'changli-yange',name:'昌黎地秧歌',region:'河北·秦皇岛',area:'华北',cat:'dance',lon:119.17,lat:39.71,emoji:'💃',img:'',desc:'昌黎地秧歌传承至今已有数百年历史，是冀东地区最具代表性的传统舞蹈之一，动作夸张、欢快热烈。',tags:['地秧歌','冀东']},
+  {id:'yicheng-hunshen',name:'翼城浑身板',region:'山西·临汾',area:'华北',cat:'performance',lon:111.72,lat:35.74,emoji:'🎵',img:'',desc:'翼城浑身板舞者手持三片檀板击打身体各部位，节奏明快、气氛热烈，是晋南地区独特的民间打击乐表演艺术。',tags:['浑身板','打击乐']},
+  {id:'wenxi-huamo',name:'闻喜花馍',region:'山西·运城',area:'华北',cat:'craft',lon:111.22,lat:35.36,emoji:'🥖',img:'',desc:'闻喜花馍将普通面团塑成五彩斑斓的艺术品，承载着婚丧嫁娶、岁时节令的民间记忆，是晋南面食文化的艺术结晶。',tags:['花馍','面食']},
+  {id:'laochencu',name:'老陈醋酿制技艺',region:'山西·太原',area:'华北',cat:'craft',lon:112.55,lat:37.87,emoji:'🫙',img:'',desc:'山西老陈醋酿制技艺凝就层次丰富的醇厚香气，是山西醋文化活态传承的典范，已有三千余年历史，醋香飘遍华夏。',tags:['老陈醋','酿造']},
+  {id:'zhuanhuadeng',name:'转花灯',region:'山西·运城',area:'华北',cat:'folklore',lon:111.00,lat:35.03,emoji:'🏮',img:'',desc:'转花灯是省级非遗，以"灯转烛不动、纸包火不灭"闻名，传承千年民间技艺，体现了山西民间艺人的精妙绝技。',tags:['花灯','精妙']},
+  {id:'wulat-cixiu',name:'乌拉特刺绣',region:'内蒙古·巴彦淖尔',area:'华北',cat:'craft',lon:107.42,lat:40.76,emoji:'🧵',img:'',desc:'乌拉特刺绣是自治区级非遗，代代相传，用针线讲述民族故事，绣出草原记忆，是蒙古族妇女智慧与审美的结晶。',tags:['刺绣','蒙古族']},
+  {id:'pashandiao',name:'爬山调',region:'内蒙古·巴彦淖尔',area:'华北',cat:'performance',lon:107.44,lat:40.74,emoji:'🎤',img:'',desc:'爬山调是传统音乐类非遗，在河套地区代代传唱，旋律悠扬婉转，歌词描述草原生活，是内蒙古西部民歌的代表。',tags:['爬山调','民歌']},
+  {id:'yingge',name:'英歌',region:'广东·普宁',area:'华南',cat:'dance',lon:116.15,lat:23.30,emoji:'🐉',img:'',desc:'英歌被誉为"中华战舞"，融合武术与舞蹈，气势刚劲，是潮汕地区春节最盛大的民俗表演，威风凛凛震撼人心。',tags:['英歌','中华战舞']},
+  {id:'xigong-qilin',name:'西贡舞麒麟',region:'广东·深圳',area:'华南',cat:'dance',lon:114.04,lat:22.52,emoji:'🦄',img:'',desc:'西贡舞麒麟拥有近200年历史，与香港西贡客家舞麒麟保持着深厚的同宗情谊，是粤港客家文化交流的生动见证。',tags:['舞麒麟','客家']},
+  {id:'xinqiao-yanglan',name:'新桥洋篮编织技艺',region:'广东·肇庆',area:'华南',cat:'craft',lon:112.46,lat:23.05,emoji:'🧺',img:'',desc:'新桥洋篮编织技艺市级非遗，源于清咸丰年间，因专供出口得名"洋篮"，是近代广东对外贸易的文化遗存。',tags:['编织','洋篮']},
+  {id:'yunan-helou',name:'郁南禾楼舞',region:'广东·云浮',area:'华南',cat:'dance',lon:111.60,lat:23.94,emoji:'🌾',img:'',desc:'郁南禾楼舞舞者头戴莲花冠、手持牛头锡杖，演绎丰收祈愿，是岭南地区古老农耕文化的珍贵见证。',tags:['禾楼舞','农耕']},
+  {id:'shatoujiaoyu-yu',name:'沙头角鱼灯舞',region:'广东·深圳',area:'华南',cat:'dance',lon:114.28,lat:22.58,emoji:'🐠',img:'',desc:'沙头角鱼灯舞意境悠远，展现了岭南沿海渔民的祈福文化，是深圳沙头角客家人传承的独特民间艺术。',tags:['鱼灯舞','祈福']},
+  {id:'foshan-shifan',name:'佛山十番',region:'广东·佛山',area:'华南',cat:'performance',lon:113.12,lat:23.02,emoji:'🎷',img:'',desc:'佛山十番是独特的民间器乐，以飞钹表演为特色，展现了浓郁的岭南音韵，是广府文化的重要组成部分。',tags:['十番','器乐']},
+  {id:'binyang-paolong',name:'宾阳炮龙节',region:'广西·南宁',area:'华南',cat:'folklore',lon:108.81,lat:23.22,emoji:'🎆',img:'',desc:'宾阳炮龙节是千年炮龙文化，以震耳欲聋的爆竹迎接舞龙，宾阳万兴炮龙文化园将炮龙活动搬上舞台，展现壮族豪情。',tags:['炮龙节','壮族']},
+  {id:'zhuang-gexu',name:'壮族歌圩',region:'广西·南宁',area:'华南',cat:'folklore',lon:108.26,lat:23.16,emoji:'🎵',img:'',desc:'壮族歌圩以歌圩为核心，集五色糯米饭、柠檬鸭等多项非遗于一体，是壮族文化的盛大节日与社交方式。',tags:['歌圩','节日']},
+  {id:'li-fanziran',name:'黎族传统纺染织绣技艺',region:'海南',area:'华南',cat:'craft',lon:109.52,lat:18.78,emoji:'🪡',img:'',desc:'跟着80岁黎族阿婆学织黎锦，体验钻木取火、跳打柴舞等原生态文化，是海南黎族最古老的生活技艺与文化基因。',tags:['黎锦','织绣']},
+  {id:'pochen-wuxing',name:'坡陈五形桩',region:'海南·屯昌',area:'华南',cat:'folklore',lon:110.10,lat:19.36,emoji:'🥋',img:'',desc:'坡陈五形桩是省级非遗，属南派少林拳种，在海南屯昌一带世代相传，展现了海南汉族移民对中原武术文化的坚守。',tags:['五形桩','武术']},
+  {id:'li-zhumuyle',name:'黎族竹木器乐',region:'海南·保亭',area:'华南',cat:'performance',lon:109.71,lat:18.63,emoji:'🎵',img:'',desc:'黎族竹木器乐演奏者用鼻箫演绎流行音乐，让传统乐器与现代旋律碰撞出新火花，是古老与现代对话的成功案例。',tags:['器乐','鼻箫']},
+  {id:'daken-huolong',name:'大坑舞火龙',region:'香港',area:'华南',cat:'folklore',lon:114.19,lat:22.28,emoji:'🔥',img:'',desc:'大坑舞火龙是国家级非遗，象征坚毅团结，百年薪火相传焕发时代活力，是香港最具代表性的传统民俗之一。',tags:['舞火龙','团结']},
+  {id:'xigong-kejia-qilin',name:'西贡坑口客家舞麒麟',region:'香港·西贡',area:'华南',cat:'dance',lon:114.26,lat:22.38,emoji:'🦄',img:'',desc:'西贡坑口客家舞麒麟寓意吉祥，和深圳西贡舞麒麟同宗同源，共同守护这项客家文化瑰宝，是粤港文化连结的纽带。',tags:['舞麒麟','吉祥']},
+  {id:'macau-nanyin',name:'南音说唱',region:'澳门',area:'华南',cat:'performance',lon:113.55,lat:22.19,emoji:'🎤',img:'',desc:'南音说唱是澳门独具特色的曲艺形式，在澳门博物馆等场所常设展演，是粤港澳大湾区非遗汇的常客。',tags:['南音','曲艺']},
+  {id:'macau-yueju',name:'粤剧',region:'澳门',area:'华南',cat:'performance',lon:113.54,lat:22.20,emoji:'🎭',img:'',desc:'粤剧作为世界非遗，跨越粤港澳，在守正创新中让古老唱腔焕发青春活力，是岭南文化最具代表性的表演艺术。',tags:['粤剧','大湾区']},
+  {id:'shanghai-xiuqiu',name:'沪上绣球制作技艺',region:'上海',area:'华东',cat:'craft',lon:121.47,lat:31.23,emoji:'🎀',img:'',desc:'沪上绣球精致典雅，融合传统与时尚，是海派文化与传统工艺结合的代表，展现了上海这座城市的精巧与包容。',tags:['绣球','海派']},
+  {id:'jiangnan-sizhu',name:'江南丝竹',region:'上海',area:'华东',cat:'performance',lon:121.49,lat:31.25,emoji:'🎻',img:'',desc:'江南丝竹在非遗馆有全息演奏，是"非遗即生活"理念的典型代表，以柔美细腻的音色诠释江南水乡的诗情画意。',tags:['丝竹','水乡']},
+  {id:'yediao',name:'叶雕',region:'上海',area:'华东',cat:'craft',lon:121.45,lat:31.22,emoji:'🍂',img:'',desc:'叶雕以落叶为纸，雕刻出精细的图案，展现了上海的城市记忆，将易逝的秋叶化为永恒的艺术珍品。',tags:['叶雕','落叶']},
+  {id:'suxiu',name:'苏绣',region:'江苏·苏州',area:'华东',cat:'craft',lon:120.59,lat:31.32,emoji:'🧵',img:'',desc:'苏绣以"平、齐、细、密、匀、顺、和、光"八大特点著称，是中国四大名绣之首，代表着苏州织绣文化的最高成就。',tags:['苏绣','精细']},
+  {id:'changzhou-shubi',name:'常州梳篦',region:'江苏·常州',area:'华东',cat:'craft',lon:119.97,lat:31.78,emoji:'🪮',img:'',desc:'常州梳篦制作精细，被誉为"宫梳名篦"，其细腻的纹理和精湛的工艺引人注目，是江南日用品中的工艺精品。',tags:['梳篦','木作']},
+  {id:'shaoxing-huangjiu',name:'绍兴黄酒酿制技艺',region:'浙江·绍兴',area:'华东',cat:'craft',lon:120.58,lat:30.00,emoji:'🍶',img:'',desc:'绍兴黄酒酿制技艺是流淌在非遗长河里的城市代表符号之一，千年越酒香飘天下，是中华酒文化的重要组成部分。',tags:['黄酒','酿造']},
+  {id:'yueju',name:'越剧',region:'浙江·绍兴',area:'华东',cat:'performance',lon:120.55,lat:29.98,emoji:'🎭',img:'',desc:'越剧以柔美委婉的唱腔著称，绍兴有"水乡戏台周周演"活动，让非遗深入百姓生活，是最具江南韵味的地方剧种。',tags:['越剧','婉转']},
+  {id:'shaoxing-wuzhanmao',name:'绍兴乌毡帽制作技艺',region:'浙江·绍兴',area:'华东',cat:'craft',lon:120.57,lat:30.02,emoji:'🎩',img:'',desc:'绍兴乌毡帽古朴的帽子凝聚着水乡匠人的手艺和几代人的记忆，是鲁迅笔下绍兴水乡最具代表性的文化符号。',tags:['乌毡帽','匠人']},
+  {id:'wang-yudeng',name:'汪满田鱼灯',region:'安徽·黄山',area:'华东',cat:'folklore',lon:118.34,lat:29.72,emoji:'🐠',img:'',desc:'汪满田鱼灯有600多年历史，正月里嬉鱼灯祈福，数百条巨型鱼灯游弋于皖南山村，蔚为壮观，是徽州文化的活态呈现。',tags:['鱼灯','祈福']},
+  {id:'minxi-hanju',name:'闽西汉剧',region:'福建·龙岩',area:'华东',cat:'performance',lon:117.02,lat:25.10,emoji:'🎶',img:'',desc:'闽西汉剧是福建省六大地方剧种之一，唱腔高亢，具有浓郁的客家风情，在闽西客家地区广泛流传。',tags:['汉剧','客家']},
+  {id:'kejia-mupou',name:'客家木偶戏',region:'福建·龙岩',area:'华东',cat:'performance',lon:117.05,lat:25.12,emoji:'🎭',img:'',desc:'客家木偶戏传承人指尖翻飞，让木偶灵动起来，是客家人重要的民俗娱乐活动，历经数百年而不衰。',tags:['木偶戏','指尖艺术']},
+  {id:'haiyang-yange',name:'海阳大秧歌',region:'山东·烟台',area:'华东',cat:'dance',lon:121.15,lat:36.68,emoji:'💃',img:'',desc:'海阳大秧歌是山东三大秧歌之一，动作粗犷奔放，曾获中国民间文艺"山花奖"，是胶东半岛民间舞蹈的杰出代表。',tags:['秧歌','奔放']},
+  {id:'jiaodong-bobo',name:'胶东花饽饽习俗',region:'山东·烟台',area:'华东',cat:'folklore',lon:121.39,lat:37.52,emoji:'🥖',img:'',desc:'胶东花饽饽习俗是省级非遗，面塑造型多样、色彩艳丽，常用于节日庆典，是胶东半岛百姓生活智慧与审美的体现。',tags:['花饽饽','面塑']},
+  {id:'liyu-deng',name:'鲤鱼灯',region:'江西·吉安',area:'华东',cat:'folklore',lon:114.99,lat:27.11,emoji:'🐟',img:'',desc:'吉安鲤鱼灯队伍穿梭如流星，栩栩如生，寓意"鲤鱼跃龙门"，是赣中地区最具代表性的元宵民俗活动。',tags:['鲤鱼灯','元宵']},
+  {id:'jizhou-yaoci',name:'吉州窑陶瓷烧制技艺',region:'江西·吉安',area:'华东',cat:'craft',lon:114.97,lat:27.10,emoji:'🏺',img:'',desc:'吉州窑千年窑火不息，独创的木叶盏、玳瑁盏等装饰技法世界独有，是宋代民窑的最高成就，被誉为"东方陶瓷珍品"。',tags:['陶瓷','木叶盏']}
+];
+
+const TIER1_IDS = new Set([
+  'jingju','kunqu','guqin','tibetan-opera','jingdezhen','thangka',
+  'jianzhi','mazu','shaolin','dai-dance','liu-jingdagu','wuqiao-zaji',
+  'laochencu','pashandiao','haicheng-gaoqiao','chaoxian-nongyue',
+  'harbin-bingdeng','jiangnan-sizhu','yueju','wang-yudeng','haiyang-yange',
+  'xiangxiu','yingge','binyang-paolong','li-fanziran','daken-huolong',
+  'macau-yueju','da-tieshu','dujiangyan-fangshuijie','anshun-laran',
+  'lanzhou-taipinggu','zhongwei-bianzhi','hetian-ditan','xiangba-zangxi'
+]);
+
+const TIER2_IDS = new Set([
+  'suxiu','yingge','bai-zaran','xiangxiu','yueju','hanju','qinqiang',
+  'haicheng-gaoqiao','fujin-yange','li-fanziran','yuju','junci-shaozhi',
+  'tang-sancai','daken-huolong','changli-yange','wuqiao-zaji','dai-xiangjiaogu',
+  'miao-lusheng','lanzhou-taipinggu','anshun-laran','yunan-helou',
+  'yingshan-chanhua','harbin-bingdeng','bai-miansu','chaoxian-nongyue',
+  'hetian-ditan','macau-nanyin','zhuang-gexu','macau-yueju','hanju',
+  'tujia-dalizi','bianxiu','jizhou-yaoci','haiyang-yange','foshan-shifan',
+  'binyang-paolong','jiangnan-sizhu'
+]);
+
+HERITAGE.forEach(item => {
+  if(TIER1_IDS.has(item.id)) item.tier = 1;
+  else if(TIER2_IDS.has(item.id)) item.tier = 2;
+  else if((item.tags||[]).join(' ').includes('UNESCO')) item.tier = 1;
+  else if((item.tags||[]).join(' ').includes('国家级非遗')) item.tier = 2;
+  else item.tier = 3;
+});
+
+/* ═══════════════════════════════════════════════════
+   ★ 精心打磨的真实河流坐标：按河道流向动态改变粗细 ★
+═══════════════════════════════════════════════════ */
+// 辅助函数：把一段长路径打断成独立线段，并计算每一段的"流量进度(flow)"
+// flow值从源头 0.1 逐渐增大到入海口 1.0，用于控制 3D 下越来越宽的视觉效果
+function buildRiverSegments(coords) {
+  let segments = [];
+  for(let i=0; i<coords.length-1; i++) {
+    // +0.1 防止源头宽度为 0 消失
+    let progress = Math.max(0.1, (i + 1) / coords.length); 
+    segments.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [coords[i], coords[i+1]] },
+      properties: { flow: progress }
+    });
+  }
+  return segments;
+}
+
+// 长江与黄河的高精度手绘坐标 (从源头到入海口)
+const RIVERS = {
+  type: 'FeatureCollection',
+  features: [
+    // 黄河 (源头 -> 兰州 -> 河套几字湾 -> 壶口 -> 济南 -> 渤海)
+    ...buildRiverSegments([
+      [96.0, 34.5], [97.5, 34.2], [98.5, 35.0], [100.0, 35.8], [101.5, 36.0], 
+      [103.0, 36.0], [104.0, 36.5], [105.0, 37.5], [106.0, 39.5], [107.5, 40.5], 
+      [109.0, 40.8], [110.5, 40.2], [111.0, 39.5], [110.5, 37.5], [110.2, 35.5], 
+      [110.5, 34.5], [112.0, 34.8], [113.5, 34.9], [115.0, 35.3], [116.0, 36.0], 
+      [117.0, 36.6], [118.5, 37.5], [119.2, 37.8]
+    ]),
+    // 长江 (源头 -> 虎跳峡 -> 宜宾 -> 重庆 -> 三峡 -> 武汉 -> 南京 -> 东海)
+    ...buildRiverSegments([
+      [91.0, 33.4], [92.0, 33.0], [94.0, 33.0], [96.0, 32.0], [97.5, 29.5], 
+      [99.5, 27.5], [100.5, 26.8], [101.5, 26.5], [103.0, 27.0], [104.5, 28.5], 
+      [105.5, 28.8], [106.5, 29.5], [107.5, 29.8], [109.5, 31.0], [111.3, 30.8], 
+      [112.5, 30.3], [113.5, 29.8], [114.3, 30.5], [115.5, 29.8], [116.5, 29.8], 
+      [117.5, 30.5], [118.8, 31.0], [119.5, 32.0], [120.5, 32.0], [121.8, 31.4]
+    ])
+  ]
+};
+
+// 薪火聚落点生成
+const CITY_LIGHTS = { type: 'FeatureCollection', features: [] };
+HERITAGE.forEach(item => {
+  CITY_LIGHTS.features.push({
+    type: 'Feature', geometry: { type: 'Point', coordinates: [item.lon, item.lat] },
+    properties: { intensity: 1, core: true }
+  });
+  for(let i=0; i<15; i++){
+    const spread = (Math.random() * 2) + 0.5;
+    const angle = Math.random() * Math.PI * 2;
+    CITY_LIGHTS.features.push({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [item.lon + Math.cos(angle)*spread, item.lat + Math.sin(angle)*spread] },
+      properties: { intensity: Math.random() * 0.4, core: false }
+    });
+  }
+});
+
+/* ═══════════════════════════════════════════════════
+   初始化极简暗黑地图
+═══════════════════════════════════════════════════ */
+const HOME = { center:[104,36], zoom:4.3, pitch:60, bearing:-12 };
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: { version: 8, sources: {}, layers: [{ id:'bg', type:'background', paint:{'background-color':'#05070a'} }] },
+  center: HOME.center, zoom: HOME.zoom, pitch: HOME.pitch, bearing: HOME.bearing,
+  antialias: true, maxZoom: 15, minZoom: 2, maxPitch: 85, renderWorldCopies: true, projection: 'mercator'
+});
+
+document.getElementById('c-in').onclick = ()=>map.zoomIn({duration:600});
+document.getElementById('c-out').onclick = ()=>map.zoomOut({duration:600});
+document.getElementById('c-rst').onclick = ()=>map.flyTo({...HOME, duration:1500, essential: true});
+
+let pitchState = 1; 
+document.getElementById('c-tlt').onclick = () => {
+  pitchState = (pitchState + 1) % 3;
+  let p = 0, b = 0;
+  if(pitchState === 1) { p = 60; b = -12; } 
+  if(pitchState === 2) { p = 85; b = 45; }  
+  map.easeTo({pitch: p, bearing: b, duration: 1200});
+};
+
+map.on('load', ()=>{
+  map.addSource('dem',{ type:'raster-dem', tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding:'terrarium', tileSize:256, maxzoom:14 });
+  map.setTerrain({source:'dem', exaggeration:2.5});
+  map.addLayer({
+    id:'hillshade', type:'hillshade', source:'dem',
+    paint:{ 'hillshade-shadow-color': '#020305', 'hillshade-highlight-color': '#0a0d14', 'hillshade-accent-color': '#000', 'hillshade-illumination-direction': 315 }
+  });
+
+  map.addSource('city-lights', { type: 'geojson', data: CITY_LIGHTS });
+  map.addLayer({
+    id: 'lights-glow', type: 'circle', source: 'city-lights',
+    paint: {
+      'circle-color': '#ff7b00',
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 2, 8, 12],
+      'circle-blur': 1.5,
+      'circle-opacity': ['*', ['get', 'intensity'], ['interpolate', ['linear'], ['zoom'], 3, 0.1, 6, 0.5]]
+    }
+  });
+  map.addLayer({
+    id: 'lights-core', type: 'circle', source: 'city-lights', filter: ['==', ['get', 'core'], true],
+    paint: { 'circle-color': '#fceabb', 'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 1, 8, 3], 'circle-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.2, 6, 0.7] }
+  });
+
+  // 渲染动态宽度的水脉
+  map.addSource('rivers', { type: 'geojson', data: RIVERS });
+  map.addLayer({
+    id: 'river-glow', type: 'line', source: 'rivers',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: {
+      'line-color': '#5ca0d3',
+      // ★ 通过 get flow 让河流发光层也随河段变宽 ★
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, ['*', ['get', 'flow'], 4], 8, ['*', ['get', 'flow'], 12]],
+      'line-blur': 4,
+      'line-opacity': 0.4
+    }
+  });
+  map.addLayer({
+    id: 'river-core', type: 'line', source: 'rivers',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: {
+      'line-color': '#8dc5eb',
+      // ★ 核心线宽随距离入海口越来越近而变大 ★
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, ['*', ['get', 'flow'], 1], 8, ['*', ['get', 'flow'], 3]],
+      'line-opacity': 0.6
+    }
+  });
+
+  fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json').then(r=>r.json()).then(provsGJ=>{
+    map.addSource('provs',{type:'geojson',data:provsGJ});
+    map.addLayer({ id:'prov-line-glow', type:'line', source:'provs', paint:{ 'line-color':'#fceabb', 'line-opacity':0.08, 'line-width':2, 'line-blur': 2 } });
+    map.addLayer({ id:'prov-line', type:'line', source:'provs', paint:{ 'line-color':'#fceabb', 'line-opacity':0.15, 'line-width':0.5 } });
+  }).catch(console.warn);
+
+  buildMarkers();
+  
+  setTimeout(()=>document.getElementById('loading').classList.add('out'), 1500);
+});
+
+function calcChinaBoxMinZoom(){
+  const cvs=map.getCanvas(); if(!cvs) return 2;
+  const YSPAN = Math.log(Math.tan(Math.PI/4+58*Math.PI/360)) - Math.log(Math.tan(Math.PI/4+10*Math.PI/360));
+  return Math.max(Math.log2(cvs.clientWidth*360/(512*80)), Math.log2(cvs.clientHeight*2*Math.PI/(512*YSPAN)));
+}
+setTimeout(()=>map.setMinZoom(calcChinaBoxMinZoom()), 500);
+window.addEventListener('resize', ()=>map.setMinZoom(calcChinaBoxMinZoom()));
+
+/* ═══════════════════════════════════════════════════
+   交互控制：图层开关与气泡提示防误触
+═══════════════════════════════════════════════════ */
+const toggleRiver = document.getElementById('toggle-river');
+let riverVisible = true;
+toggleRiver.addEventListener('click', (e) => {
+  if(e.target.classList.contains('t-icon') || e.target.classList.contains('t-box')) return; // 防止点气泡触发
+  riverVisible = !riverVisible;
+  toggleRiver.classList.toggle('off', !riverVisible);
+  map.setLayoutProperty('river-glow', 'visibility', riverVisible ? 'visible' : 'none');
+  map.setLayoutProperty('river-core', 'visibility', riverVisible ? 'visible' : 'none');
+});
+
+const toggleLight = document.getElementById('toggle-light');
+let lightVisible = true;
+toggleLight.addEventListener('click', (e) => {
+  if(e.target.classList.contains('t-icon') || e.target.classList.contains('t-box')) return;
+  lightVisible = !lightVisible;
+  toggleLight.classList.toggle('off', !lightVisible);
+  map.setLayoutProperty('lights-glow', 'visibility', lightVisible ? 'visible' : 'none');
+  map.setLayoutProperty('lights-core', 'visibility', lightVisible ? 'visible' : 'none');
+});
+
+/* ═══════════════════════════════════════════════════
+   极简花灯与逻辑
+═══════════════════════════════════════════════════ */
+const markers=[];
+
+function buildMarkers(){
+  HERITAGE.forEach(item=>{
+    const el=document.createElement('div');
+    el.className='hm';
+    el.onmouseenter = () => el.style.zIndex = 100;
+    el.onmouseleave = () => el.style.zIndex = 1;
+
+    el.innerHTML=`
+<div class="hm-scale">
+  <div class="hm-pin">
+    <div class="lantern-body">
+      <div class="l-emoji">${item.emoji}</div>
+      <div class="l-name">${item.name}</div>
+    </div>
+  </div>
+</div>`;
+
+    el.addEventListener('click', (ev) => { ev.stopPropagation(); flyLanternToCenter(item, el); });
+    const marker=new maplibregl.Marker({element:el, anchor:'bottom', offset:[0,0]}).setLngLat([item.lon,item.lat]).addTo(map);
+    marker._visible=true;
+    markers.push({el,marker,item});
+  });
+  
+  applyScale(); updateMarkers();
+}
+
+function applyScale(){ 
+  const z = map.getZoom();
+  const scale = Math.max(0.6, Math.min(1.2, 0.6 + (z - 4.5) * 0.2));
+  document.documentElement.style.setProperty('--marker-scale', scale.toFixed(3)); 
+}
+
+let filterCat='', filterArea='';
+document.querySelectorAll('.fb-pill').forEach(pill=>{
+  pill.addEventListener('click', () => {
+    const type = pill.dataset.filter, val = pill.dataset.val;
+    document.querySelectorAll(`.fb-pill[data-filter="${type}"]`).forEach(p=>p.classList.remove('active'));
+    pill.classList.add('active');
+    if(type==='cat') filterCat = val; else filterArea = val;
+    updateMarkers(); 
+  });
+});
+
+function updateMarkers(){
+  const z = map.getZoom();
+  const hasFilter = filterCat !== '' || filterArea !== '';
+  markers.forEach(({marker,item})=>{
+    const passCat = !filterCat || item.cat === filterCat;
+    const passArea = !filterArea || item.area === filterArea;
+    let passZoom = false;
+    if (hasFilter) { passZoom = true; } 
+    else {
+      if (z < 5.5) passZoom = (item.tier === 1);
+      else if (z < 7.2) passZoom = (item.tier <= 2);
+      else passZoom = true; 
+    }
+    const show = passCat && passArea && passZoom;
+    if(show && !marker._visible){ marker.addTo(map); marker._visible = true; }
+    else if(!show && marker._visible){ marker.remove(); marker._visible = false; }
+  });
+}
+
+map.on('zoom', ()=>{ applyScale(); updateMarkers(); });
+
+/* ═══════════════════════════════════════════════════
+   极致动画：飞入眼帘
+═══════════════════════════════════════════════════ */
+const flyOverlay = document.getElementById('fly-overlay');
+const heroLantern = document.getElementById('hero-lantern');
+let activeItem = null;
+
+function flyLanternToCenter(item, sourceElement) {
+  activeItem = item;
+  const rect = sourceElement.getBoundingClientRect();
+  
+  document.getElementById('hc-emoji').textContent = item.emoji;
+  document.getElementById('hc-name').textContent = item.name;
+  document.getElementById('hc-region').textContent = item.region;
+  document.getElementById('hc-desc').textContent = item.desc;
+  document.getElementById('hc-cat').textContent = CAT_LABEL[item.cat];
+  document.getElementById('hc-tags').innerHTML = (item.tags||[]).map(t=>`<span class="hc-tag">${t}</span>`).join('');
+  
+  const img = document.getElementById('hc-img');
+  if(item.img) { img.style.display='block'; img.src=item.img; img.onerror=()=>img.style.display='none'; }
+  else { img.style.display='none'; img.src=''; }
+
+  const currentScale = getComputedStyle(document.documentElement).getPropertyValue('--marker-scale');
+  
+  heroLantern.classList.remove('flying');
+  heroLantern.style.transition = 'none'; 
+  heroLantern.style.left = (rect.left + rect.width / 2) + 'px';
+  heroLantern.style.top = (rect.top + rect.height / 2) + 'px';
+  heroLantern.style.transform = `translate(-50%, -50%) scale(${currentScale})`;
+
+  void heroLantern.offsetWidth;
+
+  flyOverlay.classList.add('active');
+  heroLantern.style.transition = 'all 0.8s cubic-bezier(0.2, 1, 0.3, 1)'; 
+  heroLantern.classList.add('flying');
+  
+  map.flyTo({center:[item.lon,item.lat], zoom:Math.max(map.getZoom(), 7.5), duration:1200});
+}
+
+function closeLantern() {
+  if(!activeItem) return;
+  heroLantern.classList.remove('flying');
+  flyOverlay.classList.remove('active');
+  activeItem = null;
+  map.flyTo({...HOME, duration:1500});
+}
+
+document.getElementById('hc-close').addEventListener('click', closeLantern);
+flyOverlay.addEventListener('click', (e) => { if(e.target === flyOverlay) closeLantern(); });
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeLantern(); });
+
+</script>
+</body>
+</html>
