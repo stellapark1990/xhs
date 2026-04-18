@@ -476,7 +476,7 @@ map.on('load', ()=>{
     paint: { 'line-color': '#8dc5eb', 'line-width': ['interpolate', ['linear'], ['zoom'], 3, ['*', ['get', 'flow'], 1], 8, ['*', ['get', 'flow'], 3]], 'line-opacity': 0.6 }
   });
 
-  fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json').then(r=>r.json()).then(provsGJ=>{
+  fetch('./china_provinces.json').then(r=>r.json()).then(provsGJ=>{
     map.addSource('provs',{type:'geojson',data:provsGJ});
     map.addLayer({ id:'prov-line-glow', type:'line', source:'provs', paint:{ 'line-color':'#fceabb', 'line-opacity':0.08, 'line-width':2, 'line-blur': 2 } });
     map.addLayer({ id:'prov-line', type:'line', source:'provs', paint:{ 'line-color':'#fceabb', 'line-opacity':0.15, 'line-width':0.5 } });
